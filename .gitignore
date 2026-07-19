@@ -1,0 +1,5 @@
+intercity_api_log.json
+logs/
+__pycache__/
+*.pyc
+.env
