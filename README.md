@@ -26,6 +26,10 @@ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 intercity_checker.py
 
 Do codziennego uruchamiania używany jest macOS LaunchAgent (`StartCalendarInterval`, 20:00).
 
+### GitHub Actions (alternatywnie)
+
+Workflow `.github/workflows/daily-check.yml` odpala checker codziennie przez `schedule` (i ręcznie przez `workflow_dispatch`) na `ubuntu-latest`, przez `xvfb-run` (wirtualny wyświetlacz - headless jest blokowany). Wymaga sekretów repo `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID`. Adresy IP GitHub-hosted runnerów bywają traktowane podejrzliwie przez ochronę antybotową - warto to najpierw przetestować ręcznym uruchomieniem, zanim polegnie się wyłącznie na tym mechanizmie.
+
 ## Zastrzeżenie
 
 Projekt nieoficjalny, niezwiązany z PKP Intercity S.A. Korzysta z wewnętrznego, nieudokumentowanego API — może przestać działać w każdej chwili bez ostrzeżenia. Wyłącznie do użytku osobistego/edukacyjnego, tylko odczyt (bez rezerwacji/zakupu biletów).

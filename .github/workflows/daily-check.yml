@@ -1,0 +1,32 @@
+name: Codzienny raport wolnych miejsc
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # ~20:00 czasu polskiego latem (UTC+2). Cron GH Actions nie zna DST,
+    # więc zimą (UTC+1) uruchomi się ok. godzinę później (~21:00).
+    - cron: '0 18 * * *'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instaluj zależności
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Uruchom checker
+        # xvfb-run daje Chromium prawdziwy (niewidoczny) wyświetlacz - headless
+        # jest blokowany przez ochronę antybotową ebilet.intercity.pl.
+        run: xvfb-run -a python3 intercity_checker.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
