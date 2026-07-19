@@ -309,13 +309,23 @@ def wyslij_telegram(tekst: str, html: bool = True) -> None:
         dane = {"chat_id": chat_id, "text": czesc}
         if html:
             dane["parse_mode"] = "HTML"
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=dane,
-            timeout=20,
-            proxies={"http": None, "https": None},
-        )
-        resp.raise_for_status()
+
+        for proba in range(1, 4):
+            try:
+                resp = requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    data=dane,
+                    timeout=20,
+                    proxies={"http": None, "https": None},
+                )
+                resp.raise_for_status()
+                break
+            except requests.exceptions.RequestException:
+                # przejściowy zonk sieciowy (np. DNS tuż po przebudzeniu Maca)
+                # nie powinien zgubić całego powiadomienia - kilka prób z przerwą.
+                if proba == 3:
+                    raise
+                time.sleep(5.0 * proba)
 
 
 def main() -> None:
