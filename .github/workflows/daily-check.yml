@@ -1,11 +1,14 @@
 name: Codzienny raport wolnych miejsc
 
+# UWAGA: brak `schedule` - sprawdzone empirycznie (2026-07-19), że zapytania
+# do api-gateway.intercity.pl failują sieciowo ("TypeError: Failed to fetch")
+# z adresów IP GitHub-hosted runnerów, niezależnie od obejścia headless
+# Chromium (xvfb) i retry na Akamai 418 - wygląda na blokadę IP data center
+# lub ograniczenie geograficzne, którego nie da się obejść z poziomu kodu.
+# Codzienny check zostaje na macOS LaunchAgent. Ten workflow zostaje tylko
+# do ręcznego uruchomienia (np. do testu z innego runnera/IP w przyszłości).
 on:
   workflow_dispatch: {}
-  schedule:
-    # ~20:00 czasu polskiego latem (UTC+2). Cron GH Actions nie zna DST,
-    # więc zimą (UTC+1) uruchomi się ok. godzinę później (~21:00).
-    - cron: '0 18 * * *'
 
 jobs:
   check:

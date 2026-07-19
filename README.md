@@ -26,9 +26,9 @@ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 intercity_checker.py
 
 Do codziennego uruchamiania używany jest macOS LaunchAgent (`StartCalendarInterval`, 20:00).
 
-### GitHub Actions (alternatywnie)
+### GitHub Actions - wypróbowane, nie działa
 
-Workflow `.github/workflows/daily-check.yml` odpala checker codziennie przez `schedule` (i ręcznie przez `workflow_dispatch`) na `ubuntu-latest`, przez `xvfb-run` (wirtualny wyświetlacz - headless jest blokowany). Wymaga sekretów repo `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID`. Adresy IP GitHub-hosted runnerów bywają traktowane podejrzliwie przez ochronę antybotową - warto to najpierw przetestować ręcznym uruchomieniem, zanim polegnie się wyłącznie na tym mechanizmie.
+`.github/workflows/daily-check.yml` odpala checker ręcznie (`workflow_dispatch`) na `ubuntu-latest` przez `xvfb-run`. Sprawdzone empirycznie (2026-07-19): zapytania do `api-gateway.intercity.pl` failują sieciowo (`TypeError: Failed to fetch`) z adresów IP GitHub-hosted runnerów - niezależnie od obejścia headless Chromium i retry na Akamai 418. Wygląda na blokadę IP data center lub ograniczenie geograficzne, którego nie da się obejść z poziomu kodu. Workflow zostaje w repo tylko do ręcznych testów - codzienny check zostaje na macOS LaunchAgent.
 
 ## Zastrzeżenie
 
