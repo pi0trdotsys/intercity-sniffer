@@ -29,6 +29,7 @@ import os
 import re
 import sys
 import time
+import traceback
 from datetime import date, datetime, timedelta
 
 import requests
@@ -288,7 +289,7 @@ def formatuj_raport(dni_wyniki: list[tuple[date, list[dict]]]) -> str:
     return "\n".join(linie).rstrip()
 
 
-def wyslij_telegram(tekst: str) -> None:
+def wyslij_telegram(tekst: str, html: bool = True) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
@@ -305,9 +306,12 @@ def wyslij_telegram(tekst: str) -> None:
         czesci.append(biezaca)
 
     for czesc in czesci:
+        dane = {"chat_id": chat_id, "text": czesc}
+        if html:
+            dane["parse_mode"] = "HTML"
         resp = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat_id, "text": czesc, "parse_mode": "HTML"},
+            data=dane,
             timeout=20,
             proxies={"http": None, "https": None},
         )
@@ -315,6 +319,7 @@ def wyslij_telegram(tekst: str) -> None:
 
 
 def main() -> None:
+    blad_html = True
     try:
         with sync_playwright() as p:
             # headless=False: ebilet.intercity.pl blokuje/zawiesza połączenia
@@ -345,10 +350,13 @@ def main() -> None:
 
             browser.close()
         wiadomosc = formatuj_raport(dni_wyniki)
-    except Exception as exc:  # noqa: BLE001 - to ma polecieć na Telegram, nie zniknąć w cronie
-        wiadomosc = f"⚠️ Sprawdzanie połączeń Wrocław→Kielce nie powiodło się: {exc}"
+    except Exception:  # noqa: BLE001 - to ma polecieć na Telegram, nie zniknąć w cronie
+        pelny_traceback = traceback.format_exc()
+        print(pelny_traceback, flush=True)
+        wiadomosc = f"⚠️ Sprawdzanie połączeń Wrocław→Kielce nie powiodło się:\n{pelny_traceback[-1500:]}"
+        blad_html = False  # treść wyjątku może zawierać znaki łamiące HTML - wysyłamy jako plain text
 
-    wyslij_telegram(wiadomosc)
+    wyslij_telegram(wiadomosc, html=blad_html)
     print(wiadomosc)
 
 
