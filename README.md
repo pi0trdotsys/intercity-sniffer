@@ -1,6 +1,6 @@
 # 🚄 Intercity Sniffer
 
-**Nieoficjalny watchdog wolnych miejsc na połączeniach [intercity.pl](https://www.intercity.pl) — omija ochronę antybotową Akamai, czyta mapy miejsc wprost z wewnętrznego API i wysyła codzienny raport na Telegram.**
+**Nieoficjalny watchdog wolnych miejsc na połączeniach [intercity.pl](https://www.intercity.pl) — omija ochronę antybotową Akamai, czyta mapy miejsc wprost z wewnętrznego API i wysyła dwa razy dziennie raport na Telegram (w obie strony trasy).**
 
 ![Status](https://img.shields.io/badge/status-unofficial-red)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
@@ -16,11 +16,25 @@
 - 🔁 **Świadome ryzyka antybotowego** — osobna, świeża sesja przeglądarki na każdy sprawdzany dzień (ryzyko sensor'a Akamai narasta z liczbą zapytań w jednej sesji), automatyczny retry na `418`.
 - 📬 **Jeden czytelny raport, nie spam** — 7 dni do przodu w jednej wiadomości, HTML-owe formatowanie, wskaźniki 🟢🟡🔴, automatyczny podział na części przy przekroczeniu limitu 4096 znaków Telegrama.
 - 🧯 **Awarie też lecą na Telegram** — w razie wyjątku pełny traceback trafia jako wiadomość zamiast zniknąć w logu LaunchAgenta.
+- 💓 **Dwie trasy = darmowy heartbeat** — ten sam skrypt sprawdza obie strony (Wrocław→Kielce i Kielce→Wrocław) o różnych porach dnia; dwa oddzielne powiadomienia w ciągu doby potwierdzają, że automatyzacja żyje, bez dodatkowego mechanizmu.
 
 ## Jak to działa
 
 1. `intercity_sniff.py` — addon do mitmproxy użyty do przechwycenia i zrozumienia wewnętrznego API intercity.pl.
-2. `intercity_checker.py` — codziennie sprawdza bezpośrednie połączenia na 7 dni do przodu, dla każdego pociągu pobiera mapę miejsc i wysyła zbiorczy raport przez Telegram bota.
+2. `intercity_checker.py` — sprawdza bezpośrednie połączenia na 7 dni do przodu dla wybranej trasy (`INTERCITY_ROUTE`, patrz niżej), dla każdego pociągu pobiera mapę miejsc i wysyła zbiorczy raport przez Telegram bota.
+
+## Trasy i harmonogram (heartbeat)
+
+Skrypt obsługuje dwie relacje przez zmienną środowiskową `INTERCITY_ROUTE`:
+
+| `INTERCITY_ROUTE` | Trasa | Domyślna pora uruchomienia |
+|---|---|---|
+| `WRO_KLC` (domyślnie) | Wrocław Główny → Kielce | 20:00 |
+| `KLC_WRO` | Kielce → Wrocław Główny | 08:00 |
+
+Dwa oddzielne LaunchAgenty (`pl.intercity.sniffer.plist` i `pl.intercity.sniffer.klcwro.plist`) uruchamiają ten sam skrypt o dwóch różnych porach — w efekcie dwa powiadomienia na dobę, ~12h od siebie, pełniące rolę heartbeatu (brak wiadomości o oczekiwanej porze = coś nie działa).
+
+> ⚠️ **Kody GRM dla `KLC_WRO` są niezweryfikowane.** Kody stacji EVA/IBNR (wyszukiwarka połączeń) można bezpiecznie zamienić rolami przy odwróceniu kierunku, ale kody GRM (podsystem rezerwacji miejsc `wbnet`) zostały ustalone przez sniffing ruchu tylko dla `WRO_KLC`. Dla `KLC_WRO` przyjęto założenie, że to kody per-stacja i wystarczy je zamienić rolami — jeśli się mylę, raport błędu (`CheckError`) przyjdzie na Telegram zamiast zepsuć dane po cichu. W razie błędu: zweryfikuj prawdziwe kody przez `intercity_sniff.py` na wyszukiwaniu Kielce → Wrocław i podmień je w `ROUTES` w `intercity_checker.py`.
 
 ## Wymagania
 
@@ -33,11 +47,13 @@ playwright install chromium
 
 ```bash
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 intercity_checker.py
+# albo dla trasy powrotnej:
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... INTERCITY_ROUTE=KLC_WRO python3 intercity_checker.py
 ```
 
-Trasa i godzina są ustawione na stałe w `intercity_checker.py` (domyślnie Wrocław Główny → Kielce, po 17:00) — zmień `STACJA_WYJAZDU` / `STACJA_PRZYJAZDU` / `MIN_GODZINA`, żeby dopasować pod swoje połączenie.
+Godzina graniczna (`MIN_GODZINA`, domyślnie 17:00) jest współdzielona przez obie trasy i ustawiona na stałe w `intercity_checker.py`. Nowe trasy dodaje się w słowniku `ROUTES` na górze pliku.
 
-Do codziennego uruchamiania używany jest macOS LaunchAgent (`StartCalendarInterval`, 20:00).
+Do codziennego uruchamiania używane są dwa macOS LaunchAgenty (`StartCalendarInterval`) — patrz sekcja wyżej.
 
 ## GitHub Actions — świadomie nieużywane
 

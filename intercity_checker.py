@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Sprawdza wolne miejsca na bezpośrednich połączeniach Wrocław Główny -> Kielce
-po godzinie 17:00, dla 7 kolejnych dni (od jutra), i wysyła jeden zbiorczy
-raport na Telegram, podzielony dzień po dniu. Klasa 2 sprawdzana zawsze,
-klasa 1 tylko awaryjnie - gdy w klasie 2 brak wolnych miejsc.
+Sprawdza wolne miejsca na bezpośrednich połączeniach dla wybranej trasy
+(patrz ROUTES/INTERCITY_ROUTE poniżej - domyślnie Wrocław Główny -> Kielce)
+po godzinie MIN_GODZINA, dla 7 kolejnych dni (od jutra), i wysyła jeden
+zbiorczy raport na Telegram, podzielony dzień po dniu. Klasa 2 sprawdzana
+zawsze, klasa 1 tylko awaryjnie - gdy w klasie 2 brak wolnych miejsc.
 
 api-gateway.intercity.pl stoi za Akamai Bot Manager - zwykłe zapytania HTTP
 (bez prawdziwego środowiska przeglądarki) dostają 418 "I'm a teapot", a nawet
@@ -14,14 +15,20 @@ headless=False) - dopiero po jednym przejściu strony mamy poprawne
 ciasteczka/sensor Akamai, których używają wszystkie kolejne zapytania w tej
 samej sesji. Telegram nie ma takiej ochrony, więc tam zwykłe requests.
 
+Ten sam skrypt obsługuje dwie relacje (patrz ROUTES) - uruchomiony dwa razy
+dziennie o różnych porach, dla dwóch różnych tras, pełni też rolę heartbeatu:
+dwa oddzielne powiadomienia w ciągu doby potwierdzają, że automatyzacja żyje.
+
 Konfiguracja przez zmienne środowiskowe:
     TELEGRAM_BOT_TOKEN
     TELEGRAM_CHAT_ID
+    INTERCITY_ROUTE   - "WRO_KLC" (domyślnie) albo "KLC_WRO", patrz ROUTES
 
 Użycie:
     pip install playwright requests
     playwright install chromium
     TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 intercity_checker.py
+    TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... INTERCITY_ROUTE=KLC_WRO python3 intercity_checker.py
 """
 
 import json
@@ -37,14 +44,44 @@ from playwright.sync_api import sync_playwright
 
 API_BASE = "https://api-gateway.intercity.pl"
 
-STACJA_WYJAZDU = 5100069   # Wrocław Główny (kod EVA/IBNR)
-STACJA_PRZYJAZDU = 5100022  # Kielce Główne (kod EVA/IBNR)
+# Kody EVA/IBNR (wyszukiwarka połączeń) są ogólnodostępne i wymienne wprost
+# przy odwróceniu kierunku. Kody GRM ("wbnet", podsystem rezerwacji miejsc)
+# zostały ustalone przez przechwycenie ruchu (intercity_sniff.py) tylko dla
+# relacji Wrocław Główny -> Kielce - dla KLC_WRO to na razie ZAŁOŻENIE, że
+# to kody per-stacja (nie per-relacja) i wystarczy zamienić je rolami. Jeśli
+# pobierz_sklad()/pobierz_miejsca_wagonu() zaczną rzucać CheckError (zobaczysz
+# to w raporcie błędu na Telegramie), zweryfikuj prawdziwe kody przez sniffing
+# wyszukiwania Kielce -> Wrocław i podmień wartości poniżej.
+ROUTES = {
+    "WRO_KLC": {
+        "nazwa": "Wrocław Główny ⟶ Kielce",
+        "stacja_wyjazdu": 5100069,     # Wrocław Główny (kod EVA/IBNR)
+        "stacja_przyjazdu": 5100022,   # Kielce Główne (kod EVA/IBNR)
+        "grm_stacja_wyjazdu": "5100044",
+        "grm_stacja_przyjazdu": "5100143",
+    },
+    "KLC_WRO": {
+        "nazwa": "Kielce ⟶ Wrocław Główny",
+        "stacja_wyjazdu": 5100022,     # Kielce Główne (kod EVA/IBNR)
+        "stacja_przyjazdu": 5100069,   # Wrocław Główny (kod EVA/IBNR)
+        "grm_stacja_wyjazdu": "5100143",    # NIEZWERYFIKOWANE - patrz komentarz wyżej
+        "grm_stacja_przyjazdu": "5100044",  # NIEZWERYFIKOWANE - patrz komentarz wyżej
+    },
+}
 
-# Osobne, stałe kody używane wyłącznie przez podsystem rezerwacji miejsc
-# ("wbnet") dla tej konkretnej relacji - nie da się ich wyprowadzić z kodów
-# EVA powyżej, ustalone przez przechwycenie ruchu (patrz memory/sniffer_status.md).
-GRM_STACJA_PRZYJAZDU = "5100143"
-GRM_STACJA_WYJAZDU = "5100044"
+_ROUTE_KEY = os.environ.get("INTERCITY_ROUTE", "WRO_KLC")
+try:
+    _ROUTE = ROUTES[_ROUTE_KEY]
+except KeyError:
+    raise ValueError(
+        f"Nieznana trasa INTERCITY_ROUTE={_ROUTE_KEY!r}. Dostępne: {', '.join(ROUTES)}"
+    ) from None
+
+NAZWA_TRASY = _ROUTE["nazwa"]
+STACJA_WYJAZDU = _ROUTE["stacja_wyjazdu"]
+STACJA_PRZYJAZDU = _ROUTE["stacja_przyjazdu"]
+GRM_STACJA_WYJAZDU = _ROUTE["grm_stacja_wyjazdu"]
+GRM_STACJA_PRZYJAZDU = _ROUTE["grm_stacja_przyjazdu"]
 
 MIN_GODZINA = 17
 DNI_DO_PRZODU = 7
@@ -109,7 +146,7 @@ def search_connections(page, dzien: date) -> list[dict]:
         "wersja": "1.5.20_desktop",
         "url": (
             f"https://ebilet.intercity.pl/wyszukiwanie?dwyj={dzien_str}"
-            f"&swyj={STACJA_WYJAZDU}&sprzy={STACJA_PRZYJAZDU}&time=17%3A00"
+            f"&swyj={STACJA_WYJAZDU}&sprzy={STACJA_PRZYJAZDU}&time={MIN_GODZINA:02d}%3A00"
             "&przy=0&sprzez=&ticket100=1990&ticket50=&polbez=0"
         ),
         "dataWyjazdu": f"{dzien_str} 00:00:00",
@@ -279,7 +316,7 @@ def formatuj_raport(dni_wyniki: list[tuple[date, list[dict]]]) -> str:
     linie = [
         "━━━━━━━━━━━━━━━━━━━━━━",
         "🚄 <b>INTERCITY SNIFFER</b> · raport 7-dniowy",
-        "Wrocław Główny ⟶ Kielce · po 17:00",
+        f"{NAZWA_TRASY} · po {MIN_GODZINA}:00",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
     ]
@@ -363,7 +400,7 @@ def main() -> None:
     except Exception:  # noqa: BLE001 - to ma polecieć na Telegram, nie zniknąć w cronie
         pelny_traceback = traceback.format_exc()
         print(pelny_traceback, flush=True)
-        wiadomosc = f"⚠️ Sprawdzanie połączeń Wrocław→Kielce nie powiodło się:\n{pelny_traceback[-1500:]}"
+        wiadomosc = f"⚠️ Sprawdzanie połączeń {NAZWA_TRASY} nie powiodło się:\n{pelny_traceback[-1500:]}"
         blad_html = False  # treść wyjątku może zawierać znaki łamiące HTML - wysyłamy jako plain text
 
     wyslij_telegram(wiadomosc, html=blad_html)
