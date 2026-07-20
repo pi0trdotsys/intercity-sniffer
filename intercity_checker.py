@@ -46,12 +46,15 @@ API_BASE = "https://api-gateway.intercity.pl"
 
 # Kody EVA/IBNR (wyszukiwarka połączeń) są ogólnodostępne i wymienne wprost
 # przy odwróceniu kierunku. Kody GRM ("wbnet", podsystem rezerwacji miejsc)
-# zostały ustalone przez przechwycenie ruchu (intercity_sniff.py) tylko dla
-# relacji Wrocław Główny -> Kielce - dla KLC_WRO to na razie ZAŁOŻENIE, że
-# to kody per-stacja (nie per-relacja) i wystarczy zamienić je rolami. Jeśli
-# pobierz_sklad()/pobierz_miejsca_wagonu() zaczną rzucać CheckError (zobaczysz
-# to w raporcie błędu na Telegramie), zweryfikuj prawdziwe kody przez sniffing
-# wyszukiwania Kielce -> Wrocław i podmień wartości poniżej.
+# zostały pierwotnie ustalone przez przechwycenie ruchu (intercity_sniff.py)
+# tylko dla relacji Wrocław Główny -> Kielce; hipoteza, że to kody per-stacja
+# (nie per-relacja) i że dla KLC_WRO wystarczy zamienić je rolami, została
+# potwierdzona ręcznie 2026-07-21 na pociągu IC 2606 Kielce->Wrocław (07:12,
+# ED74, grm=1) - pobierz_sklad() zwrócił prawdziwy skład wagonów, a parsowanie
+# SVG poprawnie wykryło 46 miejsc w wagonie 2 (wolne/zajęte, numer, okno/
+# korytarz). Jeśli mimo to kiedyś pojawi się CheckError na tym torze, to
+# oznacza że coś się zmieniło po stronie API - zweryfikuj ponownie przez
+# sniffing wyszukiwania Kielce -> Wrocław.
 ROUTES = {
     "WRO_KLC": {
         "nazwa": "Wrocław Główny ⟶ Kielce",
@@ -64,8 +67,8 @@ ROUTES = {
         "nazwa": "Kielce ⟶ Wrocław Główny",
         "stacja_wyjazdu": 5100022,     # Kielce Główne (kod EVA/IBNR)
         "stacja_przyjazdu": 5100069,   # Wrocław Główny (kod EVA/IBNR)
-        "grm_stacja_wyjazdu": "5100143",    # NIEZWERYFIKOWANE - patrz komentarz wyżej
-        "grm_stacja_przyjazdu": "5100044",  # NIEZWERYFIKOWANE - patrz komentarz wyżej
+        "grm_stacja_wyjazdu": "5100143",    # zweryfikowane empirycznie 2026-07-21
+        "grm_stacja_przyjazdu": "5100044",  # zweryfikowane empirycznie 2026-07-21
     },
 }
 
@@ -261,7 +264,9 @@ def sprawdz_pociag(page, pociag: dict) -> dict:
 
     return {
         "pociag": pociag,
-        "pojazd": sklad.get("pojazdNazwa", ""),
+        # "pojazdNazwa" bywa nieobecne (np. jednostki ED74 zwracają tylko
+        # "pojazdTyp") - stąd fallback, żeby raport nie pokazywał pustki.
+        "pojazd": sklad.get("pojazdNazwa") or sklad.get("pojazdTyp", ""),
         "klasa2": wagony_klasa2,
         "klasa1_awaryjnie": wagony_klasa1,
     }

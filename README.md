@@ -34,7 +34,7 @@ Skrypt obsługuje dwie relacje przez zmienną środowiskową `INTERCITY_ROUTE`:
 
 Dwa oddzielne LaunchAgenty (`pl.intercity.sniffer.plist` i `pl.intercity.sniffer.klcwro.plist`) uruchamiają ten sam skrypt o dwóch różnych porach — w efekcie dwa powiadomienia na dobę, ~12h od siebie, pełniące rolę heartbeatu (brak wiadomości o oczekiwanej porze = coś nie działa).
 
-> ⚠️ **Kody GRM dla `KLC_WRO` są niezweryfikowane.** Kody stacji EVA/IBNR (wyszukiwarka połączeń) można bezpiecznie zamienić rolami przy odwróceniu kierunku, ale kody GRM (podsystem rezerwacji miejsc `wbnet`) zostały ustalone przez sniffing ruchu tylko dla `WRO_KLC`. Dla `KLC_WRO` przyjęto założenie, że to kody per-stacja i wystarczy je zamienić rolami — jeśli się mylę, raport błędu (`CheckError`) przyjdzie na Telegram zamiast zepsuć dane po cichu. W razie błędu: zweryfikuj prawdziwe kody przez `intercity_sniff.py` na wyszukiwaniu Kielce → Wrocław i podmień je w `ROUTES` w `intercity_checker.py`.
+> ✅ **Kody GRM dla `KLC_WRO` zweryfikowane.** Kody stacji EVA/IBNR (wyszukiwarka połączeń) są bezpiecznie wymienne przy odwróceniu kierunku. Kody GRM (podsystem rezerwacji miejsc `wbnet`) zostały pierwotnie ustalone przez sniffing ruchu tylko dla `WRO_KLC` — hipoteza, że to kody per-stacja i można je zamienić rolami dla `KLC_WRO`, została potwierdzona ręcznym testem 2026-07-21 (pociąg IC 2606 Kielce→Wrocław: poprawny skład wagonów i 46 poprawnie sparsowanych miejsc w mapie SVG).
 
 ## Wymagania
 
