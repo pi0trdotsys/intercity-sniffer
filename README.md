@@ -1,34 +1,47 @@
-# Intercity Sniffer
+# 🚄 Intercity Sniffer
 
-Nieoficjalne narzędzie sprawdzające wolne miejsca na połączeniach [intercity.pl](https://www.intercity.pl), z codziennym raportem na Telegram.
+**Nieoficjalny watchdog wolnych miejsc na połączeniach [intercity.pl](https://www.intercity.pl) — omija ochronę antybotową Akamai, czyta mapy miejsc wprost z wewnętrznego API i wysyła codzienny raport na Telegram.**
 
-Trasa i godziny są ustawione na stałe w kodzie (`intercity_checker.py`) — domyślnie Wrocław Główny → Kielce, po 17:00.
+![Status](https://img.shields.io/badge/status-unofficial-red)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Playwright](https://img.shields.io/badge/browser-Playwright-45ba4b)
+![mitmproxy](https://img.shields.io/badge/proxy-mitmproxy-orange)
+[![Last commit](https://img.shields.io/github/last-commit/pi0trdotsys/intercity-sniffer)](https://github.com/pi0trdotsys/intercity-sniffer/commits/main)
+
+## Dlaczego to nie jest zwykły scraper
+
+- 🛡️ **Obejście Akamai Bot Manager** — `api-gateway.intercity.pl` odpowiada `418` zwykłym requestom, a nawet headless Chromium bywa blokowany na `ebilet.intercity.pl`. Wszystkie zapytania wykonywane są jako `fetch()` z wnętrza prawdziwego, **widocznego** okna Chromium (Playwright, `headless=False`) — dopiero jedno przejście strony daje poprawne ciasteczka/sensor Akamai.
+- 🔍 **Reverse-engineered API** — wewnętrzne endpointy (wyszukiwanie połączeń, mapy miejsc SVG per wagon) odkryte przez przechwytywanie ruchu (`intercity_sniff.py`, addon do [mitmproxy](https://mitmproxy.org)).
+- 🎫 **Realna dostępność, nie tylko "jest miejsce"** — parsuje SVG mapy wagonu, żeby policzyć dokładne numery wolnych miejsc: klasa 2 sprawdzana zawsze, klasa 1 tylko awaryjnie, gdy w klasie 2 zero wolnych.
+- 🔁 **Świadome ryzyka antybotowego** — osobna, świeża sesja przeglądarki na każdy sprawdzany dzień (ryzyko sensor'a Akamai narasta z liczbą zapytań w jednej sesji), automatyczny retry na `418`.
+- 📬 **Jeden czytelny raport, nie spam** — 7 dni do przodu w jednej wiadomości, HTML-owe formatowanie, wskaźniki 🟢🟡🔴, automatyczny podział na części przy przekroczeniu limitu 4096 znaków Telegrama.
+- 🧯 **Awarie też lecą na Telegram** — w razie wyjątku pełny traceback trafia jako wiadomość zamiast zniknąć w logu LaunchAgenta.
 
 ## Jak to działa
 
-- `intercity_sniff.py` — addon do [mitmproxy](https://mitmproxy.org) użyty do przechwycenia i zrozumienia wewnętrznego API intercity.pl (reverse engineering).
-- `intercity_checker.py` — właściwy skrypt: co dzień sprawdza bezpośrednie połączenia na 7 dni do przodu, dla każdego pociągu pobiera mapę miejsc (klasa 2 priorytetowo, klasa 1 tylko gdy w klasie 2 brak wolnych) i wysyła zbiorczy raport przez Telegram bota.
-
-API intercity.pl stoi za Akamai Bot Manager, więc zapytania są wykonywane z wnętrza prawdziwego (widocznego) okna Chromium przez [Playwright](https://playwright.dev) — headless jest blokowany.
+1. `intercity_sniff.py` — addon do mitmproxy użyty do przechwycenia i zrozumienia wewnętrznego API intercity.pl.
+2. `intercity_checker.py` — codziennie sprawdza bezpośrednie połączenia na 7 dni do przodu, dla każdego pociągu pobiera mapę miejsc i wysyła zbiorczy raport przez Telegram bota.
 
 ## Wymagania
 
-```
-pip install playwright requests
+```bash
+pip install -r requirements.txt
 playwright install chromium
 ```
 
 ## Użycie
 
-```
+```bash
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python3 intercity_checker.py
 ```
 
+Trasa i godzina są ustawione na stałe w `intercity_checker.py` (domyślnie Wrocław Główny → Kielce, po 17:00) — zmień `STACJA_WYJAZDU` / `STACJA_PRZYJAZDU` / `MIN_GODZINA`, żeby dopasować pod swoje połączenie.
+
 Do codziennego uruchamiania używany jest macOS LaunchAgent (`StartCalendarInterval`, 20:00).
 
-### GitHub Actions - wypróbowane, nie działa
+## GitHub Actions — świadomie nieużywane
 
-`.github/workflows/daily-check.yml` odpala checker ręcznie (`workflow_dispatch`) na `ubuntu-latest` przez `xvfb-run`. Sprawdzone empirycznie (2026-07-19): zapytania do `api-gateway.intercity.pl` failują sieciowo (`TypeError: Failed to fetch`) z adresów IP GitHub-hosted runnerów - niezależnie od obejścia headless Chromium i retry na Akamai 418. Wygląda na blokadę IP data center lub ograniczenie geograficzne, którego nie da się obejść z poziomu kodu. Workflow zostaje w repo tylko do ręcznych testów - codzienny check zostaje na macOS LaunchAgent.
+[`.github/workflows/daily-check.yml`](.github/workflows/daily-check.yml) istnieje wyłącznie do ręcznych testów (`workflow_dispatch`). Sprawdzone empirycznie (2026-07-19): zapytania do `api-gateway.intercity.pl` failują sieciowo (`TypeError: Failed to fetch`) z adresów IP GitHub-hosted runnerów, niezależnie od `xvfb` i retry na `418` — wygląda na blokadę IP data center lub ograniczenie geograficzne, którego nie da się obejść z poziomu kodu. Codzienny check zostaje na macOS LaunchAgent; workflow zostaje w repo do ewentualnych testów z innego runnera/IP w przyszłości.
 
 ## Zastrzeżenie
 
