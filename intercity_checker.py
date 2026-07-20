@@ -4,7 +4,11 @@ Sprawdza wolne miejsca na bezpośrednich połączeniach dla wybranej trasy
 (patrz ROUTES/INTERCITY_ROUTE poniżej - domyślnie Wrocław Główny -> Kielce)
 po godzinie MIN_GODZINA, dla 7 kolejnych dni (od jutra), i wysyła jeden
 zbiorczy raport na Telegram, podzielony dzień po dniu. Klasa 2 sprawdzana
-zawsze, klasa 1 tylko awaryjnie - gdy w klasie 2 brak wolnych miejsc.
+zawsze, klasa 1 tylko awaryjnie - gdy w klasie 2 brak wolnych miejsc. Gdy
+danego dnia brak połączenia po MIN_GODZINA, pokazuje najbliższe osiągalne
+(patrz GODZINA_DOSTEPNY - pociągi w godzinach snu/pracy są odsiane). Błędy
+lecą na Telegram jako czytelny opis (patrz zbuduj_wiadomosc_bledu) zamiast
+surowego tracebacku.
 
 api-gateway.intercity.pl stoi za Akamai Bot Manager - zwykłe zapytania HTTP
 (bez prawdziwego środowiska przeglądarki) dostają 418 "I'm a teapot", a nawet
@@ -31,8 +35,10 @@ Użycie:
     TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... INTERCITY_ROUTE=KLC_WRO python3 intercity_checker.py
 """
 
+import html
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -87,6 +93,13 @@ GRM_STACJA_WYJAZDU = _ROUTE["grm_stacja_wyjazdu"]
 GRM_STACJA_PRZYJAZDU = _ROUTE["grm_stacja_przyjazdu"]
 
 MIN_GODZINA = 17
+
+# Realna dostępność: sen 00:00-07:00 i praca 07:00-16:00 - pociąg odjeżdżający
+# w tych godzinach jest fizycznie nieosiągalny, nawet jako "najbliższe dostępne"
+# zastępstwo w wybierz_polaczenia_dnia(). Od 16:00 uznajemy, że można teoretycznie
+# zdążyć; MIN_GODZINA (17:00) zostaje preferowanym progiem "w sam raz po pracy".
+GODZINA_DOSTEPNY = 16
+
 DNI_DO_PRZODU = 7
 MAX_MIEJSC_W_LINII = 12  # ile numerów miejsc pokazać zanim zwiniemy do "+N"
 PAUZA_MIEDZY_ZAPYTANIAMI = 0.5  # sekundy - żeby nie walić API seriami
@@ -182,10 +195,11 @@ def wybierz_polaczenia_dnia(polaczenia: list[dict]) -> tuple[list[dict], bool]:
     """
     Najpierw szuka bezpośrednich połączeń z mapą miejsc (grm=1) odjeżdżających
     po MIN_GODZINA - jak dotychczas. Jeśli takich nie ma wcale danego dnia, ale
-    istnieje inne bezpośrednie połączenie z mapą miejsc (wcześniej tego samego
-    dnia - np. poranny pociąg powrotny), wybiera POJEDYNCZE najbliższe czasowo
+    istnieje inne osiągalne bezpośrednie połączenie z mapą miejsc (poza snem
+    i pracą - patrz GODZINA_DOSTEPNY), wybiera POJEDYNCZE najbliższe czasowo
     do MIN_GODZINA (może być wcześniej albo później) zamiast zgłaszać brak
-    połączeń. Zwraca (kandydaci, czy_to_zastępstwo_poza_oknem).
+    połączeń. Pociągi odjeżdżające w trakcie snu/pracy są odsiane całkowicie -
+    i tak nie da się na nie zdążyć. Zwraca (kandydaci, czy_to_zastępstwo_poza_oknem).
     """
     bezposrednie_z_mapa = []
     for p in polaczenia:
@@ -197,20 +211,25 @@ def wybierz_polaczenia_dnia(polaczenia: list[dict]) -> tuple[list[dict], bool]:
             continue  # brak dostępnej mapy miejsc dla tego pociągu
         bezposrednie_z_mapa.append(pociag)
 
-    po_progu = [
+    osiagalne = [
         p for p in bezposrednie_z_mapa
+        if datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S").hour >= GODZINA_DOSTEPNY
+    ]
+
+    po_progu = [
+        p for p in osiagalne
         if datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S").hour >= MIN_GODZINA
     ]
     if po_progu:
         return po_progu, False
 
-    if not bezposrednie_z_mapa:
+    if not osiagalne:
         return [], False
 
-    prog = datetime.strptime(bezposrednie_z_mapa[0]["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
+    prog = datetime.strptime(osiagalne[0]["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
     prog = prog.replace(hour=MIN_GODZINA, minute=0, second=0)
     najblizszy = min(
-        bezposrednie_z_mapa,
+        osiagalne,
         key=lambda p: abs(
             (datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S") - prog).total_seconds()
         ),
@@ -346,21 +365,61 @@ def formatuj_dzien(dzien: date, wyniki: list[dict], fallback: bool = False) -> l
     return linie
 
 
+def _wolne_w_wyniku(w: dict) -> int:
+    total_k2 = sum(len(x["wolne_miejsca"]) for x in w["klasa2"])
+    total_k1 = sum(len(x["wolne_miejsca"]) for x in w["klasa1_awaryjnie"])
+    return total_k2 + total_k1
+
+
+# "Sigma" porady i złośliwe komentarze do liczby wolnych miejsc w tygodniu -
+# czysty smaczek, dobierany losowo w zależności od tego, jak nisko/wysoko
+# wypadła pula (patrz smaczek() poniżej).
+SMACZKI_ZERO = [
+    "0 wolnych miejsc w całym tygodniu. Sigma rada: kup bilet stojący i przeżyj to jak twardziel.",
+    "Pociąg pełny jak Twój kalendarz. Powodzenia w negocjacjach z konduktorem.",
+    "Zero miejsc, zero wymówek - czas rozważyć rower.",
+]
+SMACZKI_MALO = [
+    "Kilka miejsc jest, ale to nie znaczy, że będzie wygodnie. Sigma rada: usiądź plecami do kierunku jazdy, to loteria życia.",
+    "Miejsce się znajdzie, ale nie licz na komfort - to nie salonka.",
+    "Jest miejsce. Nie pytaj sąsiada o zgodę na okno, po prostu usiądź pierwszy.",
+]
+SMACZKI_DUZO = [
+    "Cały wagon niemal dla Ciebie - jak Cast Away, tylko z Intercity zamiast wyspy.",
+    "Tyle wolnych miejsc, że nawet Twoja niezdecydowanie może w końcu wygrać.",
+    "Sigma rada: usiądź przy oknie, patrz w dal i udawaj, że masz plany na życie.",
+]
+
+
+def smaczek(total_tygodniowo: int) -> str:
+    if total_tygodniowo == 0:
+        pula = SMACZKI_ZERO
+    elif total_tygodniowo < 30:
+        pula = SMACZKI_MALO
+    else:
+        pula = SMACZKI_DUZO
+    return random.choice(pula)
+
+
 def formatuj_raport(dni_wyniki: list[tuple[date, list[dict], bool]]) -> str:
+    total_tygodniowo = sum(_wolne_w_wyniku(w) for _, wyniki, _ in dni_wyniki for w in wyniki)
+
     linie = [
         "━━━━━━━━━━━━━━━━━━━━━━",
         "🚄 <b>INTERCITY SNIFFER</b> · raport 7-dniowy",
         f"{NAZWA_TRASY} · po {MIN_GODZINA}:00",
+        f"🎯 W tym tygodniu łącznie: <b>{total_tygodniowo}</b> wolnych miejsc",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
     ]
     for dzien, wyniki, fallback in dni_wyniki:
         linie.extend(formatuj_dzien(dzien, wyniki, fallback))
         linie.append("")
+    linie.append(f"<blockquote>{smaczek(total_tygodniowo)}</blockquote>")
     return "\n".join(linie).rstrip()
 
 
-def wyslij_telegram(tekst: str, html: bool = True) -> None:
+def wyslij_telegram(tekst: str, uzyj_html: bool = True) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
@@ -378,7 +437,7 @@ def wyslij_telegram(tekst: str, html: bool = True) -> None:
 
     for czesc in czesci:
         dane = {"chat_id": chat_id, "text": czesc}
-        if html:
+        if uzyj_html:
             dane["parse_mode"] = "HTML"
 
         for proba in range(1, 4):
@@ -399,8 +458,45 @@ def wyslij_telegram(tekst: str, html: bool = True) -> None:
                 time.sleep(5.0 * proba)
 
 
+# Rozpoznawanie najpopularniejszych błędów, żeby raport na Telegramie mówił
+# ludzkim językiem zamiast tylko wypluwać surowy traceback. Nierozpoznany
+# błąd i tak dostaje czytelny nagłówek + skrócony traceback w <pre> do debugowania.
+def zbuduj_wiadomosc_bledu(wyjatek: Exception, pelny_traceback: str) -> str:
+    tekst_wyjatku = str(wyjatek)
+
+    if isinstance(wyjatek, CheckError) and "418" in tekst_wyjatku:
+        opis = (
+            "🚫 <b>Akamai zablokował zapytanie (HTTP 418)</b>\n"
+            "Ochrona antybotowa intercity.pl chwilowo odmówiła dostępu - zdarza się, "
+            "zwłaszcza po wielu zapytaniach w krótkim czasie. Kolejne uruchomienie zwykle wraca do normy."
+        )
+    elif isinstance(wyjatek, requests.exceptions.RequestException) or "NameResolutionError" in tekst_wyjatku or "Failed to resolve" in tekst_wyjatku:
+        opis = (
+            "📡 <b>Brak połączenia z siecią</b>\n"
+            "Nie udało się połączyć z serwerem (DNS/internet na tym Macu chwilowo nie działały). "
+            "Sprawdź Wi-Fi - raport wróci przy następnym uruchomieniu."
+        )
+    elif "Timeout" in type(wyjatek).__name__:
+        opis = (
+            "🐢 <b>intercity.pl nie odpowiedziało na czas</b>\n"
+            "Strona lub API nie zdążyły odpowiedzieć w limicie czasu - serwer może być przeciążony albo wolny."
+        )
+    elif isinstance(wyjatek, json.JSONDecodeError):
+        opis = (
+            "🧩 <b>Nieoczekiwana odpowiedź z API</b>\n"
+            "Serwer zwrócił coś, czego nie dało się odczytać jako JSON - możliwe, że zmienił się format API."
+        )
+    else:
+        opis = f"❓ <b>Nieznany błąd</b>: {html.escape(type(wyjatek).__name__)}: {html.escape(tekst_wyjatku[:200])}"
+
+    return (
+        f"⚠️ <b>Sprawdzanie połączeń {html.escape(NAZWA_TRASY)} nie powiodło się</b>\n\n"
+        f"{opis}\n\n"
+        f"<pre>{html.escape(pelny_traceback[-800:])}</pre>"
+    )
+
+
 def main() -> None:
-    blad_html = True
     try:
         with sync_playwright() as p:
             # headless=False: ebilet.intercity.pl blokuje/zawiesza połączenia
@@ -432,13 +528,20 @@ def main() -> None:
 
             browser.close()
         wiadomosc = formatuj_raport(dni_wyniki)
-    except Exception:  # noqa: BLE001 - to ma polecieć na Telegram, nie zniknąć w cronie
+    except Exception as wyjatek:  # noqa: BLE001 - to ma polecieć na Telegram, nie zniknąć w cronie
         pelny_traceback = traceback.format_exc()
         print(pelny_traceback, flush=True)
-        wiadomosc = f"⚠️ Sprawdzanie połączeń {NAZWA_TRASY} nie powiodło się:\n{pelny_traceback[-1500:]}"
-        blad_html = False  # treść wyjątku może zawierać znaki łamiące HTML - wysyłamy jako plain text
+        wiadomosc = zbuduj_wiadomosc_bledu(wyjatek, pelny_traceback)
 
-    wyslij_telegram(wiadomosc, html=blad_html)
+    try:
+        wyslij_telegram(wiadomosc)
+    except requests.exceptions.RequestException as wyjatek:
+        # Nawet wysyłka RAPORTU O BŁĘDZIE może chwilowo paść (np. ten sam DNS
+        # blip, który spowodował błąd wyżej) - to nie może kończyć się
+        # nieobsłużonym wyjątkiem, bo wtedy giniemy bez żadnego śladu poza logiem.
+        print(f"❌ Nie udało się wysłać raportu na Telegram: {wyjatek}", flush=True)
+        return
+
     print(wiadomosc)
 
 

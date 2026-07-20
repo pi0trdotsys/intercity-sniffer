@@ -15,9 +15,11 @@
 - 🎫 **Realna dostępność, nie tylko "jest miejsce"** — parsuje SVG mapy wagonu, żeby policzyć dokładne numery wolnych miejsc: klasa 2 sprawdzana zawsze, klasa 1 tylko awaryjnie, gdy w klasie 2 zero wolnych.
 - 🔁 **Świadome ryzyka antybotowego** — osobna, świeża sesja przeglądarki na każdy sprawdzany dzień (ryzyko sensor'a Akamai narasta z liczbą zapytań w jednej sesji), automatyczny retry na `418`.
 - 📬 **Jeden czytelny raport, nie spam** — 7 dni do przodu w jednej wiadomości, HTML-owe formatowanie, wskaźniki 🟢🟡🔴, automatyczny podział na części przy przekroczeniu limitu 4096 znaków Telegrama.
-- 🧯 **Awarie też lecą na Telegram** — w razie wyjątku pełny traceback trafia jako wiadomość zamiast zniknąć w logu LaunchAgenta.
+- 🧯 **Awarie tłumaczone na ludzki** — najpopularniejsze błędy (blokada Akamai, brak sieci/DNS, timeout, zepsuty JSON) dostają czytelny opis po polsku zamiast surowego tracebacku; nierozpoznany błąd i tak trafia na Telegram z traceback w `<pre>`. Nawet jeśli wysyłka RAPORTU o błędzie też chwilowo padnie, skrypt kończy się czysto zamiast crashować bez śladu.
 - 💓 **Dwie trasy = darmowy heartbeat** — ten sam skrypt sprawdza obie strony (Wrocław→Kielce i Kielce→Wrocław) o różnych porach dnia; dwa oddzielne powiadomienia w ciągu doby potwierdzają, że automatyzacja żyje, bez dodatkowego mechanizmu.
-- 🕐 **Nigdy pusty raport bez potrzeby** — gdy dla danego dnia brak bezpośredniego połączenia z mapą miejsc po `MIN_GODZINA`, zamiast "brak połączeń" pokazuje najbliższe dostępne (wcześniej albo później) z wyraźnie oznaczoną godziną odjazdu, zamiast milczeć.
+- 🕐 **Świadomość godzin pracy/snu** — pociągi odjeżdżające 00:00-16:00 (sen + praca) są odsiane całkowicie, nawet z fallbacku poniżej — i tak nie da się na nie zdążyć.
+- 🎯 **Nigdy pusty raport bez potrzeby** — gdy dla danego dnia brak osiągalnego bezpośredniego połączenia z mapą miejsc po `MIN_GODZINA`, zamiast "brak połączeń" pokazuje najbliższe dostępne (wcześniej albo później, ale zawsze poza godzinami pracy/snu) z wyraźnie oznaczoną godziną odjazdu.
+- 💅 **Podsumowanie tygodnia + smaczek** — suma wolnych miejsc na cały tydzień w nagłówku, a na końcu raportu losowy, złośliwy/"sigma" komentarz dobrany do tego, ile miejsc się znalazło.
 
 ## Jak to działa
 
