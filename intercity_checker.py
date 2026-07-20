@@ -178,8 +178,16 @@ def search_connections(page, dzien: date) -> list[dict]:
     return data.get("polaczenia", [])
 
 
-def bezposrednie_po_17(polaczenia: list[dict]) -> list[dict]:
-    wynik = []
+def wybierz_polaczenia_dnia(polaczenia: list[dict]) -> tuple[list[dict], bool]:
+    """
+    Najpierw szuka bezpośrednich połączeń z mapą miejsc (grm=1) odjeżdżających
+    po MIN_GODZINA - jak dotychczas. Jeśli takich nie ma wcale danego dnia, ale
+    istnieje inne bezpośrednie połączenie z mapą miejsc (wcześniej tego samego
+    dnia - np. poranny pociąg powrotny), wybiera POJEDYNCZE najbliższe czasowo
+    do MIN_GODZINA (może być wcześniej albo później) zamiast zgłaszać brak
+    połączeń. Zwraca (kandydaci, czy_to_zastępstwo_poza_oknem).
+    """
+    bezposrednie_z_mapa = []
     for p in polaczenia:
         pociagi = p.get("pociagi", [])
         if len(pociagi) != 1:
@@ -187,11 +195,27 @@ def bezposrednie_po_17(polaczenia: list[dict]) -> list[dict]:
         pociag = pociagi[0]
         if pociag.get("grm") != 1:
             continue  # brak dostępnej mapy miejsc dla tego pociągu
-        odjazd = datetime.strptime(pociag["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
-        if odjazd.hour < MIN_GODZINA:
-            continue
-        wynik.append(pociag)
-    return wynik
+        bezposrednie_z_mapa.append(pociag)
+
+    po_progu = [
+        p for p in bezposrednie_z_mapa
+        if datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S").hour >= MIN_GODZINA
+    ]
+    if po_progu:
+        return po_progu, False
+
+    if not bezposrednie_z_mapa:
+        return [], False
+
+    prog = datetime.strptime(bezposrednie_z_mapa[0]["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
+    prog = prog.replace(hour=MIN_GODZINA, minute=0, second=0)
+    najblizszy = min(
+        bezposrednie_z_mapa,
+        key=lambda p: abs(
+            (datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S") - prog).total_seconds()
+        ),
+    )
+    return [najblizszy], True
 
 
 def pobierz_sklad(page, pociag: dict) -> dict:
@@ -287,7 +311,7 @@ def skroc_miejsca(numery: list[str]) -> str:
     return ", ".join(numery)
 
 
-def formatuj_dzien(dzien: date, wyniki: list[dict]) -> list[str]:
+def formatuj_dzien(dzien: date, wyniki: list[dict], fallback: bool = False) -> list[str]:
     nazwa_dnia = DNI_TYGODNIA[dzien.weekday()]
     naglowek = f"📅 <b>{nazwa_dnia} {dzien:%d.%m}</b>"
 
@@ -295,6 +319,11 @@ def formatuj_dzien(dzien: date, wyniki: list[dict]) -> list[str]:
         return [naglowek, "   <i>— brak bezpośrednich połączeń z mapą miejsc —</i>"]
 
     linie = [naglowek]
+    if fallback:
+        odjazd_fallback = datetime.strptime(wyniki[0]["pociag"]["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
+        linie.append(
+            f"   ⏱️ <i>brak połączenia po {MIN_GODZINA}:00 – najbliższe dostępne, odjazd {odjazd_fallback:%H:%M}</i>"
+        )
     for w in wyniki:
         p = w["pociag"]
         odjazd = datetime.strptime(p["dataWyjazdu"], "%Y-%m-%d %H:%M:%S")
@@ -317,7 +346,7 @@ def formatuj_dzien(dzien: date, wyniki: list[dict]) -> list[str]:
     return linie
 
 
-def formatuj_raport(dni_wyniki: list[tuple[date, list[dict]]]) -> str:
+def formatuj_raport(dni_wyniki: list[tuple[date, list[dict], bool]]) -> str:
     linie = [
         "━━━━━━━━━━━━━━━━━━━━━━",
         "🚄 <b>INTERCITY SNIFFER</b> · raport 7-dniowy",
@@ -325,8 +354,8 @@ def formatuj_raport(dni_wyniki: list[tuple[date, list[dict]]]) -> str:
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
     ]
-    for dzien, wyniki in dni_wyniki:
-        linie.extend(formatuj_dzien(dzien, wyniki))
+    for dzien, wyniki, fallback in dni_wyniki:
+        linie.extend(formatuj_dzien(dzien, wyniki, fallback))
         linie.append("")
     return "\n".join(linie).rstrip()
 
@@ -394,10 +423,11 @@ def main() -> None:
                 page.wait_for_timeout(5000)
 
                 polaczenia = search_connections(page, dzien)
-                kandydaci = bezposrednie_po_17(polaczenia)
-                print(f"    -> {len(kandydaci)} kandydatów (bezpośrednie, grm=1, po {MIN_GODZINA}:00)", flush=True)
+                kandydaci, fallback = wybierz_polaczenia_dnia(polaczenia)
+                opis = "najbliższe poza oknem" if fallback else f"po {MIN_GODZINA}:00"
+                print(f"    -> {len(kandydaci)} kandydatów (bezpośrednie, grm=1, {opis})", flush=True)
                 wyniki = [sprawdz_pociag(page, p_) for p_ in kandydaci]
-                dni_wyniki.append((dzien, wyniki))
+                dni_wyniki.append((dzien, wyniki, fallback))
                 context.close()
 
             browser.close()

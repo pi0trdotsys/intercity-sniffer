@@ -17,6 +17,7 @@
 - 📬 **Jeden czytelny raport, nie spam** — 7 dni do przodu w jednej wiadomości, HTML-owe formatowanie, wskaźniki 🟢🟡🔴, automatyczny podział na części przy przekroczeniu limitu 4096 znaków Telegrama.
 - 🧯 **Awarie też lecą na Telegram** — w razie wyjątku pełny traceback trafia jako wiadomość zamiast zniknąć w logu LaunchAgenta.
 - 💓 **Dwie trasy = darmowy heartbeat** — ten sam skrypt sprawdza obie strony (Wrocław→Kielce i Kielce→Wrocław) o różnych porach dnia; dwa oddzielne powiadomienia w ciągu doby potwierdzają, że automatyzacja żyje, bez dodatkowego mechanizmu.
+- 🕐 **Nigdy pusty raport bez potrzeby** — gdy dla danego dnia brak bezpośredniego połączenia z mapą miejsc po `MIN_GODZINA`, zamiast "brak połączeń" pokazuje najbliższe dostępne (wcześniej albo później) z wyraźnie oznaczoną godziną odjazdu, zamiast milczeć.
 
 ## Jak to działa
 
